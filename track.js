@@ -79,7 +79,8 @@ export class TrackManager {
         if (type === 'turn') {
             // Corner implementation: delegated mesh creation
             // Pass turnDir and RADIUS to create correct curve geometry
-            const cornerMesh = this.factory.createCornerMesh(this.width, turnDir, this.turnRadius);
+            // Invert turnDir because the mesh rotation transform (RotX -90 + RotY 180) mirrors the geometry
+            const cornerMesh = this.factory.createCornerMesh(this.width, -turnDir, this.turnRadius);
             
             // Calculate Center Position (Intersection of Tangents)
             // Move forward by radius from current pos
