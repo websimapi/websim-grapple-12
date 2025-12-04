@@ -9,6 +9,7 @@ export class TrackManager {
         this.segments = [];
         this.posts = [];
         this.width = 12; 
+        this.turnRadius = 45; // Large radius for rounded corners
 
         // Refactoring: Use Factory and Generator
         this.factory = new TrackFactory();
@@ -77,10 +78,12 @@ export class TrackManager {
         // Turns and Corners
         if (type === 'turn') {
             // Corner implementation: delegated mesh creation
-            // Pass turnDir to create correct curve geometry
-            const cornerMesh = this.factory.createCornerMesh(this.width, turnDir);
+            // Pass turnDir and RADIUS to create correct curve geometry
+            const cornerMesh = this.factory.createCornerMesh(this.width, turnDir, this.turnRadius);
             
-            const cornerCenterOffset = this.currentDir.clone().multiplyScalar(this.width / 2);
+            // Calculate Center Position (Intersection of Tangents)
+            // Move forward by radius from current pos
+            const cornerCenterOffset = this.currentDir.clone().multiplyScalar(this.turnRadius);
             const cornerCenter = this.currentPos.clone().add(cornerCenterOffset);
             
             cornerMesh.rotation.order = 'YXZ';
@@ -97,38 +100,57 @@ export class TrackManager {
                 mesh: cornerMesh,
                 start: this.currentPos.clone(),
                 dir: this.currentDir.clone(),
-                length: this.width,
+                length: this.turnRadius * (Math.PI / 2), // Approximate arc length for physics
                 width: this.width,
                 angle: seg.angle,
                 slope: 0
             });
 
             // Add Post
-            this.addPost(cornerCenter, turnDir);
+            this.addPost(cornerCenter, turnDir, this.turnRadius);
 
             // Update state for next segment
-            this.currentPos.add(cornerCenterOffset); // Move to center of corner
+            this.currentPos.add(cornerCenterOffset); // Move to Intersection
             
             // Rotate direction
             const rotationAxis = new THREE.Vector3(0, 1, 0);
             this.currentDir.applyAxisAngle(rotationAxis, turnDir * angle); 
             
-            // Move to edge of corner in new direction
-            this.currentPos.add(this.currentDir.clone().multiplyScalar(this.width / 2));
+            // Move from Intersection to End of Turn
+            this.currentPos.add(this.currentDir.clone().multiplyScalar(this.turnRadius));
         }
     }
 
-    addPost(centerPos, turnDir) {
-        // Perpendicular vector
-        const perp = new THREE.Vector3(-this.currentDir.z, 0, this.currentDir.x);
-        // Vector to inner corner
-        const cornerVector = perp.clone().multiplyScalar(-turnDir).sub(this.currentDir).normalize();
+    addPost(intersectionPos, turnDir, radius) {
+        // Calculate Center of Curvature
+        // From Intersection, move back along Dir by Radius, then sideways by Radius
+        // Actually, logic derived in thought process:
+        // C = (Start) + perp * turnDir * R
+        // Start = Intersection - Dir * R
+        // So C = Intersection - Dir * R + Perp * turnDir * R
         
-        const postPos = centerPos.clone();
-        postPos.add(cornerVector.multiplyScalar(12));
+        const dir = this.currentDir.clone(); // Direction entering the turn
+        // Perp points Left if turnDir=1, Right if turnDir=-1
+        // Perp relative to Dir: (-z, 0, x) is Left.
+        const perp = new THREE.Vector3(-dir.z, 0, dir.x);
         
-        // Adjust post height to match road
-        postPos.y += 2; 
+        // Center of Curvature
+        const curvatureCenter = intersectionPos.clone()
+            .sub(dir.clone().multiplyScalar(radius))
+            .add(perp.clone().multiplyScalar(turnDir * radius));
+            
+        // We want the post at the Apex of the Inner Curve
+        // Vector from Center to Intersection bisects the turn
+        const toIntersection = new THREE.Vector3().subVectors(intersectionPos, curvatureCenter).normalize();
+        
+        // Inner Radius
+        const innerRadius = radius - this.width / 2;
+        
+        // Place post slightly inside the track (buffer)
+        const postDist = innerRadius - 4.0; 
+        
+        const postPos = curvatureCenter.clone().add(toIntersection.multiplyScalar(postDist));
+        postPos.y = intersectionPos.y + 2; 
 
         // delegated post mesh creation
         const post = this.factory.createPostMesh();
